@@ -1,0 +1,33 @@
+import React, {useEffect, useMemo, useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import axios from 'axios';
+import './styles.css';
+
+const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api';
+const client = axios.create({baseURL: API});
+
+function App(){
+  const [movies,setMovies]=useState([]); const [selected,setSelected]=useState(null); const [search,setSearch]=useState('');
+  const [admin,setAdmin]=useState(localStorage.getItem('token')!==null); const [adminOpen,setAdminOpen]=useState(false); const [editing,setEditing]=useState(null);
+  const [login,setLogin]=useState({username:'',password:''}); const [error,setError]=useState('');
+  const load=()=>client.get('/movies/').then(r=>setMovies(r.data)).catch(()=>setError('Backend not reachable. Start Django on port 8000.'));
+  useEffect(load,[]);
+  const filtered=useMemo(()=>movies.filter(m=>m.title.toLowerCase().includes(search.toLowerCase())||m.genre.toLowerCase().includes(search.toLowerCase())),[movies,search]);
+  const featured=movies.find(m=>m.featured)||movies[0];
+  const sections=[['Trending Now',filtered],['Movies',filtered.filter(m=>m.content_type==='movie')],['TV Shows',filtered.filter(m=>m.content_type==='series')]];
+  const loginAdmin=async e=>{e.preventDefault(); try{const r=await axios.post(API.replace('/api','')+'/api/token/',login); localStorage.setItem('token',r.data.access); setAdmin(true);setAdminOpen(false);setError('');}catch{setError('Invalid admin credentials')}};
+  const save=async data=>{const cfg={headers:{Authorization:`Bearer ${localStorage.getItem('token')}`}}; try{if(data.id) await client.put(`/movies/${data.id}/`,data,cfg); else await client.post('/movies/',data,cfg);setEditing(null);load();}catch{setError('Admin action failed. Make sure you are logged in as staff.')}};
+  const remove=async id=>{try{await client.delete(`/movies/${id}/`,{headers:{Authorization:`Bearer ${localStorage.getItem('token')}`}});load();}catch{setError('Delete failed')}};
+  return <div className="app">
+    <header><div className="logo">NETFLIX<span>+</span></div><nav><a href="#home">Home</a><a href="#movies">Movies</a><a href="#shows">TV Shows</a></nav><div className="actions"><input placeholder="Search" value={search} onChange={e=>setSearch(e.target.value)}/>{admin?<><button className="adminbtn" onClick={()=>setAdminOpen(true)}>Admin</button><button onClick={()=>{localStorage.removeItem('token');setAdmin(false)}}>Logout</button></>:<button onClick={()=>setAdminOpen(true)}>Admin Login</button>}</div></header>
+    {error&&<div className="error">{error}<button onClick={()=>setError('')}>×</button></div>}
+    {featured&&<section id="home" className="hero" style={{backgroundImage:`linear-gradient(90deg,rgba(0,0,0,.95),rgba(0,0,0,.5),rgba(0,0,0,.1)),url(${featured.backdrop_url||featured.poster_url})`}}><div className="heroContent"><div className="eyebrow">FEATURED • {featured.content_type==='series'?'SERIES':'MOVIE'}</div><h1>{featured.title}</h1><p>{featured.description}</p><div className="meta">★ {featured.rating} &nbsp; {featured.release_year} &nbsp; {featured.maturity} &nbsp; {featured.duration}</div><div><button className="play" onClick={()=>setSelected(featured)}>▶ Play</button><button className="more" onClick={()=>setSelected(featured)}>ⓘ More Info</button></div></div></section>}
+    <main id="movies">{sections.map(([title,items])=><section className="row" key={title}><h2>{title}</h2><div className="cards">{items.map(m=><button className="card" key={m.id} onClick={()=>setSelected(m)}><img src={m.poster_url} /><div className="cardOverlay"><strong>{m.title}</strong><span>★ {m.rating} • {m.release_year}</span></div></button>)}</div></section>)}</main>
+    {selected&&<div className="modal" onClick={()=>setSelected(null)}><div className="detail" onClick={e=>e.stopPropagation()} style={{backgroundImage:`linear-gradient(0deg,#111 10%,transparent 100%),url(${selected.backdrop_url||selected.poster_url})`}}><button className="close" onClick={()=>setSelected(null)}>×</button><div className="detailInfo"><div className="eyebrow">{selected.content_type==='series'?'TV SHOW':'MOVIE'}</div><h2>{selected.title}</h2><p>{selected.description}</p><div className="meta">★ {selected.rating} • {selected.release_year} • {selected.genre} • {selected.maturity} • {selected.duration}</div><button className="play">▶ Play</button></div></div></div>}
+    {adminOpen&&<div className="modal" onClick={()=>setAdminOpen(false)}><div className="panel" onClick={e=>e.stopPropagation()}>{!admin?<><h2>Admin Login</h2><form onSubmit={loginAdmin}><input placeholder="Username" value={login.username} onChange={e=>setLogin({...login,username:e.target.value})}/><input placeholder="Password" type="password" value={login.password} onChange={e=>setLogin({...login,password:e.target.value})}/><button className="play">Sign In</button></form></>:<><div className="panelHead"><h2>Manage Catalog</h2><button className="play" onClick={()=>setEditing({})}>+ Add Title</button></div>{movies.map(m=><div className="adminRow" key={m.id}><span>{m.title} <small>{m.content_type}</small></span><div><button onClick={()=>setEditing(m)}>Edit</button><button onClick={()=>remove(m.id)}>Delete</button></div></div>)}</>}</div></div>}
+    {editing&&<MovieForm value={editing} onCancel={()=>setEditing(null)} onSave={save}/>}<footer>© 2026 Netflix+ Clone • React + Django</footer>
+  </div>
+}
+function MovieForm({value,onCancel,onSave}){const [f,setF]=useState({content_type:'movie',maturity:'U/A 13+',release_year:new Date().getFullYear(),rating:8,featured:false,...value});const set=(k,v)=>setF({...f,[k]:v}); return <div className="modal"><div className="panel form"><h2>{f.id?'Edit Title':'Add Title'}</h2>{['title','description','genre','duration','poster_url','backdrop_url'].map(k=><input key={k} placeholder={k.replace('_',' ')} value={f[k]||''} onChange={e=>set(k,e.target.value)}/>)}<select value={f.content_type} onChange={e=>set('content_type',e.target.value)}><option value="movie">Movie</option><option value="series">Series</option></select><input type="number" placeholder="Release year" value={f.release_year} onChange={e=>set('release_year',Number(e.target.value))}/><input type="number" min="0" max="10" step="0.1" placeholder="Rating" value={f.rating} onChange={e=>set('rating',Number(e.target.value))}/><label><input type="checkbox" checked={!!f.featured} onChange={e=>set('featured',e.target.checked)}/> Featured</label><div className="formActions"><button onClick={onCancel}>Cancel</button><button className="play" onClick={()=>onSave(f)}>Save</button></div></div></div>}
+
+createRoot(document.getElementById('root')).render(<App/>);
